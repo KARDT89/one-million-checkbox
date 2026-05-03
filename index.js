@@ -3,9 +3,43 @@ import express from "express";
 import path from "path";
 import { Server } from "socket.io";
 import { publisher, redis, subscriber } from "./redis-connection.js";
+import JWT from "jsonwebtoken";
+import JwksClient from "jwks-rsa";
+import cookieParser from "cookie-parser";
 
 const CHECKBOX_SIZE = 100;
 const CHECKBOX_STATE_KEY = "checkbox-state";
+const AUTH_SERVER = "http://localhost:8000";
+const APP_PORT = process.env.PORT ?? 3000;
+
+const jwksClient = JwksClient({
+    jwksUri: `${AUTH_SERVER}/.well-known/jwks.json`,
+    cache: true,
+    rateLimit: true,
+});
+
+async function verifyToken(token) {
+    const decoded = JWT.decode(token, { complete: true });
+    if (!decoded) throw new Error("Invalid token");
+    const key = await jwksClient.getSigningKey(decoded.header.kid);
+    return JWT.verify(token, key.getPublicKey(), { algorithms: ["RS256"] });
+}
+
+function requireAuth(req, res, next) {
+    const token = req.cookies?.token;
+    if (!token) {
+        return res.redirect(
+            `${AUTH_SERVER}/o/authenticate?redirect_uri=http://localhost:${APP_PORT}/auth/callback`,
+        );
+    }
+    try {
+        req.user = JWT.decode(token);
+        next();
+    } catch {
+        res.clearCookie("token");
+        res.redirect(`${AUTH_SERVER}/o/authenticate`);
+    }
+}
 
 async function main() {
     const PORT = process.env.PORT ?? 8000;
@@ -14,6 +48,30 @@ async function main() {
 
     const io = new Server();
     io.attach(server);
+
+    app.use(cookieParser());
+
+    // Auth routes — before static middleware
+    app.get("/auth/callback", async (req, res) => {
+        const { token } = req.query;
+        if (!token) return res.redirect("/");
+
+        try {
+            await verifyToken(token);
+            res.cookie("token", token, { httpOnly: true, maxAge: 3600 * 1000 });
+            res.redirect("/");
+        } catch {
+            res.status(401).send("Invalid token");
+        }
+    });
+
+    app.get("/auth/logout", (req, res) => {
+        res.clearCookie("token");
+        res.redirect(`${AUTH_SERVER}/o/authenticate`);
+    });
+
+    // Static files and protected routes
+    app.use(requireAuth, express.static(path.resolve("./public")));
 
     await subscriber.subscribe("internal-server:checkbox:change");
     subscriber.on("message", (channel, message) => {
@@ -70,7 +128,6 @@ async function main() {
     });
 
     // Express
-    app.use(express.static(path.resolve("./public")));
 
     app.get("/health", (req, res) => res.json({ healthy: true }));
 
