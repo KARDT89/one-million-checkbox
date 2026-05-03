@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Checkboxes</title>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap");
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:#0a0a0a;color:#f0f0f0;font-family:"Syne",sans-serif;
+  min-height:100vh;padding:3rem 2rem;
+  display:flex;flex-direction:column;align-items:center;
+}
+
+.header{text-align:center;margin-bottom:3rem;position:relative}
+.header::before{
+  content:"";display:block;width:1px;height:60px;
+  background:linear-gradient(to bottom,transparent,#f0f0f0);
+  margin:0 auto 1.5rem;
+}
+
+h1{
+  font-size:clamp(2.5rem,6vw,4.5rem);font-weight:800;
+  letter-spacing:-0.04em;line-height:1;color:#f0f0f0;text-transform:uppercase;
+}
+
+p{
+  margin-top:0.75rem;font-family:"Space Mono",monospace;
+  font-size:0.75rem;color:#555;letter-spacing:0.08em;text-transform:uppercase;
+}
+
+#container{
+  display:grid;grid-template-columns:repeat(10,1fr);
+  gap:8px;max-width:520px;width:100%;
+}
+
+input[type="checkbox"]{
+  appearance:none;-webkit-appearance:none;
+  width:44px;height:44px;border:1px solid #2a2a2a;
+  background:#111;cursor:pointer;position:relative;
+  transition:border-color 0.15s ease,background 0.15s ease;
+}
+input[type="checkbox"]:hover{border-color:#555;background:#1a1a1a}
+input[type="checkbox"]:checked{background:#f0f0f0;border-color:#f0f0f0}
+input[type="checkbox"]:checked::after{content:"";position:absolute;inset:0;background:#f0f0f0}
+input[type="checkbox"]:focus-visible{outline:1px solid #666;outline-offset:2px}
+
+.footer{
+  margin-top:2.5rem;font-family:"Space Mono",monospace;
+  font-size:0.65rem;color:#2a2a2a;letter-spacing:0.1em;text-transform:uppercase;
+}
+
+.counter{
+  margin-top:1.5rem;font-family:"Space Mono",monospace;
+  font-size:0.7rem;color:#444;letter-spacing:0.05em;
+}
+.counter span{color:#f0f0f0;font-weight:700}
+
+/* Toast */
+#toast{
+  position:fixed;bottom:2rem;left:50%;transform:translateX(-50%) translateY(20px);
+  background:#f0f0f0;color:#0a0a0a;
+  font-family:"Space Mono",monospace;font-size:0.7rem;letter-spacing:0.08em;
+  text-transform:uppercase;padding:0.6rem 1.25rem;
+  border:none;
+  opacity:0;
+  transition:opacity 0.2s ease,transform 0.2s ease;
+  pointer-events:none;
+  white-space:nowrap;
+}
+#toast.show{
+  opacity:1;transform:translateX(-50%) translateY(0);
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Checkboxes</h1>
+  <p>A tiny playground of clickable squares. Tick away.</p>
+</div>
+
+<div id="container"></div>
+<div class="counter"><span id="checked-count">0</span> / 100 checked</div>
+<div class="footer">shared state · socket.io · redis</div>
+<div id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  const container = document.getElementById("container");
+  const countEl = document.getElementById("checked-count");
+  const toast = document.getElementById("toast");
+  let toastTimer = null;
+
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 2500);
+  }
+
+  function updateCount() {
+    countEl.textContent = container.querySelectorAll("input:checked").length;
+  }
+
+  socket.on("server:checkbox:change", ({ index, checked }) => {
+    const input = document.getElementById(`checkbox-${index}`);
+    if (input) { input.checked = checked; updateCount(); }
+  });
+
+  socket.on("rate:limited", () => {
+    showToast("Slow down — clicking too fast.");
+  });
+
+  window.addEventListener("load", async () => {
+    const response = await fetch("/checkboxes", { method: "GET" });
+    const data = await response.json();
+
+    if (data?.checkboxes) {
+      data.checkboxes.forEach((serverValue, index) => {
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.id = `checkbox-${index}`;
+        input.checked = serverValue;
+        input.addEventListener("change", (e) => {
+          socket.emit("client:checkbox:change", { index, checked: e.target.checked });
+          updateCount();
+        });
+        container.appendChild(input);
+      });
+      updateCount();
+    }
+  });
+</script>
+</body>
+</html>
